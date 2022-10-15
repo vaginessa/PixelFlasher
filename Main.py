@@ -1242,6 +1242,7 @@ class PixelFlasher(wx.Frame):
                     hardware = device.hardware
                 else:
                     hardware = ''
+            print(f"Launching browser for Firmware download URL: https://developers.google.com/android/images#{hardware}")
             webbrowser.open_new(f"https://developers.google.com/android/images#{hardware}")
             self._on_spin('stop')
 
@@ -1250,6 +1251,7 @@ class PixelFlasher(wx.Frame):
         # -----------------------------------------------
         def _open_sdk_link(event):
             self._on_spin('start')
+            print(f"Launching browser for SDK download URL: https://developer.android.com/studio/releases/platform-tools.html")
             webbrowser.open_new('https://developer.android.com/studio/releases/platform-tools.html')
             self._on_spin('stop')
 

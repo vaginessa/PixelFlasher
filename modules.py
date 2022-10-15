@@ -514,7 +514,7 @@ def sanitize_file(filename):
 # ============================================================================
 def sanitize_db(filename):
     debug(f"Santizing {filename} ...")
-    con = get_db()
+    con = sl.connect(filename)
     cursor = con.cursor()
     with con:
         data = con.execute("SELECT id, file_path FROM BOOT")
@@ -641,10 +641,11 @@ def process_file(self, file_type):
     # extract boot.img or init_boot.img
     if get_firmware_model() in ('panther', 'cheetah'):
         boot_file_name = 'init_boot.img'
+        files_to_extract = 'boot.img init_boot.img'
     else:
         boot_file_name = 'boot.img'
     debug(f"Extracting {boot_file_name} from {image_file_path} ...")
-    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{tmp_dir_full}\" \"{image_file_path}\" {boot_file_name}"
+    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{tmp_dir_full}\" \"{image_file_path}\" {files_to_extract}"
     debug(f"{theCmd}")
     res = run_shell(theCmd)
     # expect ret 0
@@ -675,6 +676,9 @@ def process_file(self, file_type):
         debug(f"Cached copy of {boot_file_name} with sha1: {checksum} is not found.")
         debug(f"Copying {image_file_path} to {cached_boot_img_dir_full}")
         shutil.copy(boot_img_file, cached_boot_img_dir_full, follow_symlinks=True)
+        if get_firmware_model() in ('panther', 'cheetah'):
+            # we need to copy boot.img for Pixel 7, 7P so that we can do live boot.
+            shutil.copy(os.path.join(tmp_dir_full, 'boot.img'), cached_boot_img_dir_full, follow_symlinks=True)
     else:
         debug(f"Found a cached copy of {file_type} {boot_file_name} sha1={checksum}")
 
@@ -1382,14 +1386,15 @@ def patch_boot_img(self):
         # Create Patching Script
         #------------------------------------
         if device.magisk_path and magisk_app_version:
+            set_patched_with(magisk_app_version)
             print("Creating pf_patch.sh script ...")
-            magisk_version = device.magisk_app_version
+            # magisk_version = device.magisk_app_version
             path_to_busybox = os.path.join(get_bundle_dir(),'bin', f"busybox_{device.architecture}")
             dest = os.path.join(config_path, 'tmp', 'pf_patch.sh')
             with open(dest.strip(), "w", encoding="ISO-8859-1", newline='\n') as f:
                 data = "#!/system/bin/sh\n"
                 data += "##############################################################################\n"
-                data += f"# PixelFlasher {VERSION} patch script using Magisk Manager {magisk_version}\n"
+                data += f"# PixelFlasher {VERSION} patch script using Magisk Manager {magisk_app_version}\n"
                 data += "##############################################################################\n"
                 data += f"ARCH={device.architecture}\n"
                 data += f"cp {device.magisk_path} /data/local/tmp/pf.zip\n"
@@ -1483,7 +1488,7 @@ def patch_boot_img(self):
             # Execute the pf_patch.sh script
             #------------------------------------
             print("Executing the extraction script ...")
-            print(f"PixelFlasher Patching phone with Magisk: {magisk_version}")
+            print(f"PixelFlasher Patching phone with Magisk: {magisk_app_version}")
             theCmd = f"\"{get_adb()}\" -s {device.id} shell /data/local/tmp/pf_patch.sh"
             res = run_shell2(theCmd)
         else:
@@ -1495,6 +1500,7 @@ def patch_boot_img(self):
     # Patching decision
     # -------------------------------
     if is_rooted:
+        set_patched_with(magisk_version)
         if not magisk_app_version:
             patch_with_root()
         elif magisk_version and magisk_app_version:
@@ -1550,7 +1556,7 @@ def patch_boot_img(self):
                     # continue with patching using Magisk Manager.
                     patch_with_magisk_manager()
                 else:
-                    print("Magisk Manager is still not detected.\n\Aborting ...")
+                    print("Magisk Manager is still not detected.\n\Aborting ...\n")
                     return
             except Exception:
                 print(f"{datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed Magisk is still not detected.")
@@ -1559,7 +1565,7 @@ def patch_boot_img(self):
         else:
             # not ok to download and install, (Magisk is hidden option)
             print("User pressed cancel for downloading and installing Magisk.")
-            print("Aborting ...")
+            print("Aborting ...\n")
             return
 
     # -------------------------------
@@ -1665,7 +1671,7 @@ def patch_boot_img(self):
     con.commit()
     cursor = con.cursor()
     sql = 'INSERT INTO BOOT (boot_hash, file_path, is_patched, magisk_version, hardware, epoch) values(?, ?, ?, ?, ?, ?) ON CONFLICT (boot_hash) DO NOTHING'
-    data = (checksum, cached_boot_img_path, 1, magisk_version, device.hardware, time.time())
+    data = (checksum, cached_boot_img_path, 1, get_patched_with(), device.hardware, time.time())
     cursor.execute(sql, data)
     con.commit()
     boot_id = cursor.lastrowid
@@ -1694,7 +1700,7 @@ def patch_boot_img(self):
     populate_boot_list(self)
 
     end = time.time()
-    print(f"Magisk Version: {magisk_version}")
+    print(f"Magisk Version: {get_patched_with()}")
     print(f"Patch time: {math.ceil(end - start)} seconds")
     print("------------------------------------------------------------------------------\n")
 
@@ -1793,7 +1799,18 @@ def live_boot_phone(self):
         print("==============================================================================")
         print(f" {datetime.now():%Y-%m-%d %H:%M:%S} PixelFlasher {VERSION}              Live Booting\n     {boot.boot_path} ...")
         print("==============================================================================")
-        theCmd = f"\"{get_fastboot()}\" -s {device.id} boot \"{boot.boot_path}\""
+        if device.hardware in ('panther', 'cheetah'):
+            # Pixel 7 and 7P need a special command to Live Boot.
+            # https://forum.xda-developers.com/t/td1a-220804-031-factory-image-zip-is-up-unlock-bootloader-root-pixel-7-pro-cheetah-limited-safetynet-all-relevant-links.4502805/post-87571843
+            kernel = os.path.join(os.path.dirname(boot.boot_path), "boot.img")
+            if os.path.exists(kernel):
+                theCmd = f"\"{get_fastboot()}\" -s {device.id} boot \"{kernel}\" \"{boot.boot_path}\""
+            else:
+                print(f"\n{datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Missing Kernel {kernel} ...\n")
+                print(f"Aborting ...\n")
+                return
+        else:
+            theCmd = f"\"{get_fastboot()}\" -s {device.id} boot \"{boot.boot_path}\""
         debug(theCmd)
         res = run_shell(theCmd)
         if res.returncode != 0:

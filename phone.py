@@ -647,7 +647,7 @@ class Device():
         if self._magisk_apks is None:
             try:
                 apks = []
-                mlist = ['stable', 'beta', 'canary', 'debug']
+                mlist = ['stable', 'beta', 'canary', 'debug', 'alpha', 'delta']
                 for i in mlist:
                     apk = self.get_magisk_apk_details(i)
                     apks.append(apk)
@@ -669,6 +669,10 @@ class Device():
             url = "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/canary.json"
         elif channel == 'debug':
             url = "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/debug.json"
+        elif channel == 'alpha':
+            url = "https://raw.githubusercontent.com/vvb2060/magisk_files/alpha/alpha.json"
+        elif channel == 'delta':
+            url = "https://raw.githubusercontent.com/HuskyDG/magisk-files/main/canary.json"
         else:
             print(f"\n{datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Unknown Magisk channel {channel}\n")
             return
@@ -819,11 +823,11 @@ class Device():
     def install_apk(self, app, fastboot_included = False):
         if self.mode == 'adb' and get_adb():
             print(f"Installing {app} on device ...")
-            theCmd = f"\"{get_adb()}\" -s {self.id} install {app}"
+            theCmd = f"\"{get_adb()}\" -s {self.id} install \"{app}\""
             debug(theCmd)
             res = run_shell(theCmd)
             if res.returncode != 0:
-                print(f"\n{datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an errorwhile installing {app}")
+                print(f"\n{datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an errorwhile installing \"{app}\"")
                 print(f"Return Code: {res.returncode}.")
                 print(f"Stdout: {res.stdout}.")
                 print(f"Stderr: {res.stderr}.")
